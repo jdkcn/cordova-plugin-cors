@@ -10,6 +10,8 @@ interface ZoneType {
 }
 declare const Zone: ZoneType;
 
+type HTTPMethod = 'DELETE' | 'GET' | 'HEAD' | 'OPTIONS' | 'POST' | 'PUT' | 'TRACE';
+
 const exec: (
     onsuccess: (value: any) => void,
     onerror: (error: any) => void,
@@ -36,172 +38,71 @@ interface XHRResponse {
     allResponseHeaders: string;
 }
 
-class XHR implements XMLHttpRequest {
-    static readonly UNSENT = 0;
-    static readonly OPENED = 1;
-    static readonly HEADERS_RECEIVED = 2;
-    static readonly LOADING = 3;
-    static readonly DONE = 4;
-
-    readonly UNSENT = 0;
-    readonly OPENED = 1;
-    readonly HEADERS_RECEIVED = 2;
-    readonly LOADING = 3;
-    readonly DONE = 4;
-
-    status = 0;
-    statusText: string = null;
-    get response(): any {
-        return this.responseText;
+var readyState = Symbol();
+Object.defineProperty(XMLHttpRequest, 'readyState', {
+    get: function() {
+        return this[readyState];
     }
-    responseText: string = null;
-    responseXML: Document = null;
+});
 
-    // TODO: Support these.
-    timeout = 60;
-    withCredentials = false;
-    responseType: '' | 'arraybuffer' | 'blob' | 'document' | 'json' | 'text' = null;
-    responseURL: string = null;
-    upload: XMLHttpRequestUpload = null;
-    msCachingEnabled = () => false;
-    msCaching: string = null;
-    // ---
+XMLHttpRequest.prototype['makeAbsolute'] = function (relativeUrl: string) {
+    var anchor = document.createElement('a');
+    anchor.href = relativeUrl;
+    return anchor.href;
+};
 
-    get readyState(): number {
-        return this._readyState;
+XMLHttpRequest.prototype.setRequestHeader = function (header: string, value?: string | number | boolean) {
+    this.requestHeaders = this.requestHeaders || {};
+    if (value) {
+        this.requestHeaders[header] = value;
     }
-    set readyState(readyState: number) {
-        this._readyState = readyState;
-        const event = document.createEvent('Event');
-        event.initEvent('readystatechange', false, false);
-        this.fireEvent('readystatechange', event);
+    else {
+        delete this.requestHeaders[header];
     }
+};
 
-    onprogress: (event: ProgressEvent) => void = null;
-    onload: (event: Event) => void = null;
-    onloadstart: (event: Event) => void = null;
-    onloadend: (event: ProgressEvent) => void = null;
-    onreadystatechange: (event: Event) => void = null;
-    onerror: (event: Event) => void = null;
-    onabort: (event: Event) => void = null;
-    ontimeout: (event: ProgressEvent) => void = null;
-
-    private _readyState = this.UNSENT;
-    private path: string = null;
-    private method: 'DELETE' | 'GET' | 'HEAD' | 'OPTIONS' | 'POST' | 'PUT' | 'TRACE' = null;
-    private requestHeaders: {[header: string]: string} = {};
-    private responseHeaders: {[header: string]: string} = {};
-    private allResponseHeaders: string = null;
-
-    private listeners: { [key: string]: ((event: Event | ProgressEvent) => void)[] } = {
-        progress: [],
-        load: [],
-        loadstart: [],
-        loadend: [],
-        readystatechange: [],
-        error: [],
-        abort: [],
-        timeout: []
-    };
-
-    private zone: Zone;
-
-    open(method: 'DELETE' | 'GET' | 'HEAD' | 'OPTIONS' | 'POST' | 'PUT' | 'TRACE', path: string) {
-        if (this.readyState !== this.UNSENT) {
-            throw 'XHR is already opened';
-        }
-        this.readyState = this.OPENED;
-        this.path = this.makeAbsolute(path);
-        this.method = method;
+XMLHttpRequest.prototype.open = function (method: HTTPMethod, path: string) {
+    const _this: XMLHttpRequest = this;
+    if (_this.readyState !== XMLHttpRequest.UNSENT) {
+        throw 'XHR is already opened';
     }
-
-    send(data?: Document | string | any) {
-        if (this.readyState !== this.OPENED) {
-            if (this.readyState === this.UNSENT) {
-                throw new DOMException('State is UNSENT but it should be OPENED.', 'InvalidStateError');
-            }
-            throw new DOMException('The object is in an invalid state (should be OPENED).', 'InvalidStateError');
-        }
-        this.zone = typeof Zone !== 'undefined' ? Zone.current : undefined;
-        this.readyState = this.LOADING;
-
-        exec((response: XHRResponse) => {
-            this.status = response.status;
-            this.statusText = response.statusText;
-            this.responseText = response.responseText;
-            this.responseHeaders = response.responseHeaders;
-            this.allResponseHeaders = response.allResponseHeaders;
-            this.readyState = this.DONE;
-
-            const event = document.createEvent('Event');
-            event.initEvent('Load', false, false);
-            this.fireEvent('load', event);
-            this.fireEvent('loadend', event);
-        }, (error) => {
-            const event = document.createEvent('Event');
-            event.initEvent('error', true, false);
-            this.fireEvent('error', event);
-            this.readyState = this.DONE;
-        }, 'CORS', 'send', [this.method, this.path, this.requestHeaders, data]);
-    }
-
-    abort() {
-        // Ignored.
-    }
-
-    overrideMimeType(mimeType: string) {
-        throw 'Not supported';
-    }
-
-    setRequestHeader(header: string, value?: string) {
-        if (value) {
-            this.requestHeaders[header] = value;
-        } else {
-            delete this.requestHeaders[header];
-        }
-    }
-
-    getResponseHeader(header: string): string {
-        return this.responseHeaders[header];
-    }
-
-    getAllResponseHeaders(): string {
-        return this.allResponseHeaders;
-    }
-
-    addEventListener(eventName: keyof XHRListeners, listener: (event: Event | ProgressEvent) => void) {
-        this.listeners[eventName].push(listener);
-    }
-
-    dispatchEvent(event: Event): boolean {
-        this.fireEvent(event.type as 'progress' | 'load' | 'loadstart' | 'loadend' | 'readystatechange' | 'error' | 'abort' | 'timeout',
-            event);
-        return true;
-    }
-
-    removeEventListener(eventName: keyof XHRListeners) {
-        this.listeners[eventName] = [];
-    }
-
-    private makeAbsolute(relativeUrl: string): string {
-        var anchor = document.createElement('a');
-        anchor.href = relativeUrl;
-        return anchor.href;
-    }
-
-    private fireEvent(eventName: keyof XHRListeners, event: Event | ProgressEvent) {
-        this.call(this['on' + eventName], event);
-        for (const listener of this.listeners[eventName]) {
-            this.call(listener, event);
-        }
-    }
-
-    private call(func: Function, event: Event) {
-        if (!func) {
-            return;
-        }
-        !!this.zone ? this.zone.run(func, this, [event]) : func.bind(this)(event);
-    }
+    _this[readyState] = XMLHttpRequest.OPENED;
+    _this['path'] = this.makeAbsolute(path);
+    _this['method'] = method;
 }
 
-module.exports = XHR;
+XMLHttpRequest.prototype.send = function (data: any) {
+    var _this: XMLHttpRequest = this;
+    if (this.readyState !== XMLHttpRequest.OPENED) {
+        if (this.readyState === XMLHttpRequest.UNSENT) {
+            throw new DOMException('State is UNSENT but it should be OPENED.', 'InvalidStateError');
+        }
+        throw new DOMException('The object is in an invalid state (should be OPENED).', 'InvalidStateError');
+    }
+    this.zone = typeof Zone !== 'undefined' ? Zone.current : undefined;
+    this.readyState = this.LOADING;
+    exec(function (response) {
+        _this.status = response.status;
+        _this.statusText = response.statusText;
+        _this.responseText = response.responseText;
+        _this['responseHeaders'] = response.responseHeaders;
+        _this['allResponseHeaders'] = response.allResponseHeaders;
+        _this[readyState] = XMLHttpRequest.DONE;
+        _this.dispatchEvent(new Event('load', {
+            bubbles: false,
+            cancelable: false
+        }));
+        _this.dispatchEvent(new Event('loadend', {
+            bubbles: false,
+            cancelable: false
+        }));
+    }, function (error) {
+        _this.dispatchEvent(new Event('error', {
+            bubbles: true,
+            cancelable: false
+        }))
+        _this[readyState] = _this.DONE;
+    }, 'CORS', 'send', [this.method, this.path, this.requestHeaders, data]);
+};
+
+module.exports = XMLHttpRequest;
